@@ -167,7 +167,7 @@ def analyze_project_communication(playbook: ContractPlaybook, email_data: dict) 
     """
 
     response = client.beta.chat.completions.parse(
-        model="gpt-4o-2024-08-06",
+        model="gemini-2.5-flash",
         messages=[
             {"role": "system", "content": NODE_2_3_SYSTEM_PROMPT},
             {"role": "user", "content": user_content}
