@@ -1,12 +1,11 @@
 import os
-import json
-from datetime import datetime, timedelta
-from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
 from openai import OpenAI
 
-# Initialize client (ensure OPENAI_API_KEY is set in your environment)
-client = OpenAI()
+# Initialize the OpenAI client pointing to Google Gemini's endpoint
+client = OpenAI(
+    api_key=os.environ.get("GEMINI_API_KEY"),
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+)
 
 # =====================================================================
 # 1. PYDANTIC SCHEMAS (Deterministic Data Contracts)
