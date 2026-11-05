@@ -114,12 +114,11 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         client = OpenAI(
             api_key=api_key,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            timeout=120.0,  # Increased timeout for Free Tier heavy JSON generation
-            max_retries=0   # Disable silent background retries on rate limits
+            timeout=120.0,  # Keep the longer timeout
+            max_retries=3   # Re-enable automatic backoff retries for rate limits
         )
         
         try:
-            # Use current late-2026 models
             models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]
             response = None
             last_error = None
@@ -138,14 +137,16 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
                 except Exception as e:
                     last_error = e
                     error_type = type(e).__name__
-                    # Safely catch Timeouts, Rate Limits, 404s, and 500s to trigger the fallback model
-                    if "404" in str(e) or "500" in str(e) or error_type in ["NotFoundError", "InternalServerError", "APITimeoutError", "RateLimitError"]:
+                    
+                    # Only skip to the next model if the model itself is not found (404) or broken (500)
+                    if "404" in str(e) or "500" in str(e) or error_type in ["NotFoundError", "InternalServerError"]:
                         continue
                     else:
-                        raise e # Fail immediately on auth errors (401) or bad requests (400)
+                        # If it's a rate limit or a timeout that exhausted all retries, bubble it up directly!
+                        raise ValueError(f"API Error ({error_type}): {str(e)}")
             
             if response is None:
-                raise ValueError(f"All Gemini models failed. Last error: {str(last_error)}")
+                raise ValueError(f"All Gemini models failed (likely 404 or 500). Last error: {str(last_error)}")
                 
             raw_text = response.choices[0].message.content
             
@@ -159,7 +160,7 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
             
         except Exception as e:
             # Raise a cleaner error to show on Streamlit
-            raise ValueError(f"Gemini API Error: {str(e)} (Check your API Key and Google AI Studio access)")
+            raise ValueError(f"Gemini API Error: {str(e)}")
         
     elif provider == "Claude":
         client = anthropic.Anthropic(api_key=api_key)
