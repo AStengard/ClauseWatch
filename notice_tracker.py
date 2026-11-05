@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 from datetime import datetime, timedelta
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
@@ -87,32 +88,18 @@ CRITICAL ANALYSIS RULES:
 
 def get_structured_response(provider: str, api_key: str, system_prompt: str, user_content: str, schema_class: type[BaseModel]) -> BaseModel:
     """Helper to route the request to the correct LLM provider and return a validated Pydantic object."""
+    
+    # Force the LLM to adhere to the schema via prompting (Bulletproof strategy for all providers)
+    schema_instructions = f"\n\nIMPORTANT: You MUST return ONLY valid JSON. The JSON must strictly match this schema:\n{json.dumps(schema_class.model_json_schema())}"
+    final_system_prompt = system_prompt + schema_instructions
+
     if provider == "OpenAI":
         client = OpenAI(api_key=api_key)
-        response = client.beta.chat.completions.parse(
-            model="gpt-4o-2024-08-06",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            response_format=schema_class,
-            temperature=0.0
-        )
-        return response.choices[0].message.parsed
-        
-    elif provider == "Gemini":
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-        )
-        # FIX: Changed to a valid Gemini model and used a bulletproof JSON extraction method.
-        # Google's wrapper occasionally rejects the strict 'json_schema' formatting required by .parse()
-        prompt_with_schema = system_prompt + f"\n\nIMPORTANT: You MUST return ONLY valid JSON that exactly matches this schema:\n{schema_class.model_json_schema()}"
-        
+        # Switched to gpt-4o-mini and native JSON mode to avoid .parse() strictness errors and 404s
         response = client.chat.completions.create(
-            model="gemini-1.5-flash",
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": prompt_with_schema},
+                {"role": "system", "content": final_system_prompt},
                 {"role": "user", "content": user_content}
             ],
             temperature=0.0,
@@ -121,9 +108,33 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         raw_json = response.choices[0].message.content
         return schema_class.model_validate_json(raw_json)
         
+    elif provider == "Gemini":
+        # Switched to Google's Native REST API (requests) to completely bypass OpenAI compatibility wrapper bugs
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        payload = {
+            "contents": [
+                {"role": "user", "parts": [{"text": final_system_prompt + "\n\nUser Input:\n" + user_content}]}
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature": 0.0
+            }
+        }
+        resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
+        
+        if resp.status_code != 200:
+            raise ValueError(f"Gemini API Error {resp.status_code}: {resp.text}")
+            
+        data = resp.json()
+        try:
+            raw_json = data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            raise ValueError(f"Unexpected Gemini response structure: {data}")
+            
+        return schema_class.model_validate_json(raw_json)
+        
     elif provider == "Claude":
         client = anthropic.Anthropic(api_key=api_key)
-        # Claude native tool calling maps perfectly to Pydantic JSON schemas
         response = client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=4096,
@@ -144,6 +155,7 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
 
     else:
         raise ValueError(f"Unsupported provider: {provider}")
+
 
 def compile_contract_playbook(base_clauses_text: str, custom_contract_text: str, provider: str, api_key: str) -> ContractPlaybook:
     """Node 1: Compiles raw contract text and overrides into a structured JSON Playbook."""
