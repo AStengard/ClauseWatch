@@ -235,10 +235,8 @@ with tab1:
                 st.markdown(badge_html, unsafe_allow_html=True)
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Strict Deadline", f"{rule.deadline_days} Days", rule.deadline_type)
-                c2.markdown(f"**Required Recipient:**
-`{rule.required_recipient}`")
-                c3.markdown(f"**Required Channel:**
-`{rule.required_channel}`")
+                c2.markdown(f"**Required Recipient:**\n`{rule.required_recipient}`")
+                c3.markdown(f"**Required Channel:**\n`{rule.required_channel}`")
                 
                 st.markdown(f"**Synthesized Binding Rule:** {rule.effective_rule_logic}")
                 if rule.override_clause_reference:
