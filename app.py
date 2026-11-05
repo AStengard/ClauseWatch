@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
-# Import schemas and functions from your backend file (notice_tracker.py)
+# Importera scheman och funktioner från vår backend-fil (notice_tracker.py)
+# Detta är hjärnan i systemet där AI:n kopplas in och reglerna definieras.
 from notice_tracker import (
     ContractPlaybook,
     ContractualTriggerRule,
@@ -15,16 +16,17 @@ from notice_tracker import (
 )
 
 # =====================================================================
-# PAGE CONFIGURATION & STYLING
+# SIDKONFIGURATION & DESIGN (CSS)
 # =====================================================================
 st.set_page_config(
-    page_title="ClauseWatch | Operational Contract Intelligence",
+    page_title="ClauseWatch | Operativ Kontraktsbevakning",
     page_icon="⚖️",
     layout="wide",
 )
 
 st.markdown("""
 <style>
+    /* Styling för att markera exakta textcitat från bevisningen */
     .highlight-quote {
         background-color: #ffeeba;
         padding: 2px 6px;
@@ -33,6 +35,7 @@ st.markdown("""
         font-weight: 600;
         color: #212529;
     }
+    /* Röd varningstag för regler som ändrats i AF-delen */
     .override-badge {
         background-color: #f8d7da;
         color: #721c24;
@@ -41,6 +44,7 @@ st.markdown("""
         font-size: 0.8em;
         font-weight: 600;
     }
+    /* Grön tag för regler där standardavtalet gäller */
     .standard-badge {
         background-color: #d4edda;
         color: #155724;
@@ -53,7 +57,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =====================================================================
-# DEFAULT SYNTHETIC DATA
+# STANDARDDATA FÖR DEMONSTRATION
+# (Detta är texten som fylls i automatiskt i textrutorna på första sidan)
 # =====================================================================
 
 DEFAULT_BASE_STANDARD = """AB 04 Kap. 2 § 7 (Underrättelse om likställd ÄTA):
@@ -76,14 +81,15 @@ Med ändring av AB 04 ska begreppet "utan dröjsmål" avseende ÄTA-anmälan och
 § 3. Passivitetsverkan vid byggmötesprotokoll
 Invändning mot uppgift eller ekonomisk allokering i byggmötesprotokoll ska framställas skriftligen till Beställarens ombud senast fem (5) kalenderdagar efter att protokollet distribuerats, vid äventyr av att protokollets innehåll annars anses bindande godkänt."""
 
+# Fiktiva e-postmeddelanden som vi kan testa systemet med
 MOCK_INBOX = [
     {
         "id": "MSG-101",
-        "label": "🔴 [Trap 1: Wrong Recipient] Unforeseen Concrete Culvert",
+        "label": "🔴 [Fälla 1: Fel mottagare] Oförutsedd betongkulvert",
         "timestamp": "2026-10-27",
         "sender": "Johan Berg (Platschef, Entreprenören AB)",
         "recipient": "Erik Svensson (Byggledare, Fastighetsbolaget)",
-        "channel": "Email",
+        "channel": "E-post",
         "subject": "Schaktning vid hus B - gammal betongkulvert",
         "body": (
             "Tjena Erik! När vi grävde för grunden vid Hus B imorse stötte vi på en gammal "
@@ -94,11 +100,11 @@ MOCK_INBOX = [
     },
     {
         "id": "MSG-102",
-        "label": "🟠 [Trap 2: Passivity / Loyalty Risk] Site Meeting Minutes #14",
+        "label": "🟠 [Fälla 2: Passivitet / Lojalitetsrisk] Byggmötesprotokoll #14",
         "timestamp": "2026-10-27",
         "sender": "Erik Svensson (Byggledare, Fastighetsbolaget)",
         "recipient": "Johan Berg (Platschef, Entreprenören AB)",
-        "channel": "Distributed Site Meeting Minutes (Byggmötesprotokoll)",
+        "channel": "Distribuerat Byggmötesprotokoll",
         "subject": "Protokoll Byggmöte #14 - Kvarteret Kronan",
         "body": (
             "Punkt 14.3 Ventilation: Noterades att fläktrummet i källaren måste flyttas 2 meter "
@@ -108,11 +114,11 @@ MOCK_INBOX = [
     },
     {
         "id": "MSG-103",
-        "label": "🟡 [Latent Delay Trigger] Delayed Facade Blueprints",
+        "label": "🟡 [Dold risk för försening] Försenade fasadritningar",
         "timestamp": "2026-10-27",
         "sender": "Sara Nordin (Arbetsledare, Entreprenören AB)",
         "recipient": "Anna Lindqvist (Beställarens Ombud)",
-        "channel": "Email",
+        "channel": "E-post",
         "subject": "Angående detaljritningar för fasadinfästning",
         "body": (
             "Hej Anna, vi väntar fortfarande på de reviderade konstruktionsritningarna för "
@@ -122,11 +128,11 @@ MOCK_INBOX = [
     },
     {
         "id": "MSG-104",
-        "label": "🟢 [True Negative / Safe] Crane Delivery Coordination",
+        "label": "🟢 [Ingen risk / Säkert] Samordning av kranleverans",
         "timestamp": "2026-10-27",
         "sender": "Johan Berg (Platschef, Entreprenören AB)",
         "recipient": "Erik Svensson (Byggledare, Fastighetsbolaget)",
-        "channel": "Email",
+        "channel": "E-post",
         "subject": "Leverans av mobilkran torsdag morgon",
         "body": (
             "Hej Erik, ville bara bekräfta att mobilkranen anländer kl 06:30 på torsdag "
@@ -136,142 +142,150 @@ MOCK_INBOX = [
 ]
 
 # =====================================================================
-# SIDEBAR: CONFIGURATION & ARCHITECTURE INFO
+# SIDOMENY: INSTÄLLNINGAR & ARKITEKTURINFO
 # =====================================================================
 with st.sidebar:
-    st.title("⚙️ Engine Settings (BYOK)")
-    st.markdown("Select your preferred AI provider and enter your API key to run the engine. Your key is kept secure in this session only.")
+    st.title("⚙️ Inställningar (API-nyckel)")
+    st.markdown("Välj din föredragna AI-leverantör och ange din API-nyckel för att köra motorn. Nyckeln sparas endast säkert under denna session.")
     
     provider = st.selectbox(
-        "AI Provider",
+        "AI-leverantör",
         options=["OpenAI", "Gemini", "Claude"],
         index=0
     )
     
     api_key = st.text_input(
-        f"{provider} API Key", 
+        f"{provider} API-nyckel", 
         type="password",
-        help=f"Enter your {provider} API key here."
+        help=f"Ange din {provider} API-nyckel här."
     )
     
     st.session_state["provider"] = provider
     st.session_state["api_key"] = api_key
 
     st.divider()
-    st.subheader("🏗️ Pipeline Architecture")
+    st.subheader("🏗️ Systemarkitektur (Hur det fungerar)")
     st.caption("""
-    **Node 1 (Compiler):** Resolves hierarchy between Base Standard (AB 04) and Custom Contract Terms (*Tolkningsföreträde*) into a typed Pydantic `ContractPlaybook`.
+    **Nod 1 (Kompilatorn):** Hanterar *tolkningsföreträde* mellan standardavtal (t.ex. AB 04) och särskilda kontraktsvillkor (AF-del). Sammanställer detta till en bindande och strukturerad regelbok (JSON).
     
-    **Node 2 (Triage & Grounding):** Scans operational messages for latent triggers, verifying exact substring quotes.
+    **Nod 2 (Analys & Bevis):** Skannar löpande projektkommunikation efter dolda avtalsrisker. Säkerställer bevisvärde genom att extrahera exakta citat från texten.
     
-    **Node 3 (Procedural & Date Engine):** Checks recipient authority (*Behörighet*) + runs deterministic Python date math.
+    **Nod 3 (Formkrav & Tidsfrister):** Kontrollerar mottagarens behörighet samt beräknar via traditionell kod (ej AI) sista datum för preklusion/förlorad rätt.
     """)
 
 # =====================================================================
-# MAIN HEADER
+# HUVUDRUBRIK
 # =====================================================================
-st.title("⚖️ ClauseWatch: Cross-Document Notice Tracker")
-st.caption("*By Alfred Stengard*")
+st.title("⚖️ ClauseWatch: Automatisk Avtalsbevakning")
+st.caption("*Av Alfred Stengard*")
 st.markdown(
-    "**Bridging the gap between static contract playbooks and live operational project communications.**"
+    "**Överbryggar klyftan mellan statiska avtalsvillkor och den dagliga projektkommunikationen.**"
 )
 
+# Skapa två flikar för användaren
 tab1, tab2 = st.tabs([
-    "📜 Step 1: Contract Playbook Compiler (Node 1)", 
-    "📬 Step 2: Live Project Inbox Monitor (Nodes 2 & 3)"
+    "📜 Steg 1: Kompilera Avtalsregler (Nod 1)", 
+    "📬 Steg 2: Övervaka Projektets Inkorg (Nod 2 & 3)"
 ])
 
 # =====================================================================
-# TAB 1: NODE 1 (CONTRACT COMPILER)
+# FLIK 1: NOD 1 (KOMPILERA AVTALET)
 # =====================================================================
 with tab1:
-    st.subheader("Compile Contractual Trigger Matrix & Resolve Hierarchy")
+    st.subheader("Kompilera avtalsregler och hantera tolkningsföreträde")
     st.markdown(
-        "Feed the base framework (e.g., **AB 04**) alongside the project-specific overrides (**Kontraktsvillkor / AF-del**). "
-        "Node 1 enforces *tolkningsföreträde* and compiles a structured JSON ruleset."
+        "Mata in standardavtalet (t.ex. **AB 04**) tillsammans med de projektspecifika ändringarna (**Kontraktsvillkor / AF-del**). "
+        "Systemet tillämpar *tolkningsföreträde* automatiskt och skapar en strukturerad och bindande regelbok."
     )
 
+    # Visa två textrutor jämte varandra
     col_left, col_right = st.columns(2)
     with col_left:
         custom_text = st.text_area(
-            "🥇 Priority 1: Custom Contract & Appendices (Kontrakt / AF-del)",
+            "🥇 Prioritet 1: Kontraktsvillkor & AF-del",
             value=DEFAULT_CUSTOM_CONTRACT,
             height=260
         )
     with col_right:
         base_text = st.text_area(
-            "🥈 Priority 2: Base Standard Terms (e.g., AB 04)",
+            "🥈 Prioritet 2: Standardavtal (t.ex. AB 04)",
             value=DEFAULT_BASE_STANDARD,
             height=260
         )
 
-    if st.button("🚀 Compile Contract Playbook (Run Node 1)", type="primary"):
+    # Knappen som startar processen i Node 1
+    if st.button("🚀 Kompilera Avtalsregler", type="primary"):
         if not st.session_state.get("api_key"):
-            st.error("Please enter your API Key in the sidebar to run live compilation.")
+            st.error("Vänligen ange din API-nyckel i sidomenyn till vänster för att köra analysen.")
         else:
-            with st.spinner(f"Running via {st.session_state['provider']}..."):
+            with st.spinner(f"Analyserar och sammanställer regler via {st.session_state['provider']}..."):
+                # Här anropar vi AI-motorn från notice_tracker.py
                 playbook = compile_contract_playbook(
                     base_text, 
                     custom_text,
                     st.session_state["provider"],
                     st.session_state["api_key"]
                 )
+                # Spara resultatet i sessionen så vi minns det på nästa flik
                 st.session_state["playbook"] = playbook
-                st.success(f"Compiled {len(playbook.compiled_rules)} binding rules for {playbook.project_name}!")
+                st.success(f"Lyckades! Kompilerade {len(playbook.compiled_rules)} bindande regler för {playbook.project_name}.")
 
-    # Display Compiled Playbook if available
+    # Om vi har kompilerat regler, visa dem på skärmen
     if "playbook" in st.session_state:
         pb: ContractPlaybook = st.session_state["playbook"]
         st.divider()
-        st.markdown(f"### 📋 Active Rule Matrix: `{pb.project_name}`")
+        st.markdown(f"### 📋 Aktiva Avtalsregler: `{pb.project_name}`")
 
         for rule in pb.compiled_rules:
+            # Sätt en röd eller grön bricka beroende på om regeln blivit ändrad i AF-delen
             badge_html = (
-                '<span class="override-badge">⚡ Overridden by Custom Contract</span>'
+                '<span class="override-badge">⚡ Ändrad av Kontraktsvillkor (AF-del)</span>'
                 if rule.overridden_by_custom_terms
-                else '<span class="standard-badge">✓ Base Standard Applies</span>'
+                else '<span class="standard-badge">✓ Standardavtal gäller</span>'
             )
+            
             with st.expander(f"**{rule.rule_id}** — {rule.trigger_category} ({rule.base_standard_clause})", expanded=True):
                 st.markdown(badge_html, unsafe_allow_html=True)
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Strict Deadline", f"{rule.deadline_days} Days", rule.deadline_type)
-                c2.markdown(f"**Required Recipient:**\n`{rule.required_recipient}`")
-                c3.markdown(f"**Required Channel:**\n`{rule.required_channel}`")
                 
-                st.markdown(f"**Synthesized Binding Rule:** {rule.effective_rule_logic}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Strikt Tidsfrist", f"{rule.deadline_days} Dagar", rule.deadline_type)
+                c2.markdown(f"**Krävd Mottagare:**\n`{rule.required_recipient}`")
+                c3.markdown(f"**Krävd Kanal:**\n`{rule.required_channel}`")
+                
+                st.markdown(f"**Sammanfattad Bindande Regel:** {rule.effective_rule_logic}")
                 if rule.override_clause_reference:
-                    st.caption(f"Modified by: {rule.override_clause_reference} | Risk: {rule.consequence_of_non_compliance}")
+                    st.caption(f"Ändrad av: {rule.override_clause_reference} | Konsekvens/Risk: {rule.consequence_of_non_compliance}")
 
 # =====================================================================
-# TAB 2: NODES 2 & 3 (LIVE INBOX MONITOR)
+# FLIK 2: NOD 2 & 3 (ÖVERVAKA INKORGEN LIVE)
 # =====================================================================
 with tab2:
     if "playbook" not in st.session_state:
-        st.warning("⚠️ Please compile the Contract Playbook in **Step 1** first so the Inbox Agent has rules to evaluate against.")
+        st.warning("⚠️ Vänligen kompilera avtalsreglerna i **Steg 1** först, så att systemet har ett regelverk att utvärdera meddelandena mot.")
     else:
-        st.subheader("Live Project Communications Monitor")
+        st.subheader("Övervakning av Inkommande Projektkommunikation")
         
         inbox_col, analysis_col = st.columns([1, 1.3], gap="large")
 
         with inbox_col:
-            st.markdown("#### 📥 Select Incoming Communication")
+            st.markdown("#### 📥 Välj Inkommande Meddelande")
             selected_label = st.radio(
-                "Project Feed:",
+                "Projektflöde (Demo):",
                 options=[m["label"] for m in MOCK_INBOX],
                 index=0
             )
             selected_msg = next(m for m in MOCK_INBOX if m["label"] == selected_label)
 
-            st.markdown("#### 📄 Message Envelope & Raw Content")
+            st.markdown("#### 📄 Meddelande & Innehåll")
             with st.container(border=True):
-                st.markdown(f"**Timestamp:** `{selected_msg['timestamp']}`")
-                st.markdown(f"**From:** `{selected_msg['sender']}`")
-                st.markdown(f"**To:** `{selected_msg['recipient']}`")
-                st.markdown(f"**Channel:** `{selected_msg['channel']}`")
-                st.markdown(f"**Subject:** **{selected_msg['subject']}**")
+                st.markdown(f"**Datum/Tid:** `{selected_msg['timestamp']}`")
+                st.markdown(f"**Från:** `{selected_msg['sender']}`")
+                st.markdown(f"**Till:** `{selected_msg['recipient']}`")
+                st.markdown(f"**Kanal:** `{selected_msg['channel']}`")
+                st.markdown(f"**Ämne:** **{selected_msg['subject']}**")
                 st.divider()
                 
-                # If analysis has run for this message, highlight the exact quote!
+                # Om vi redan har analyserat detta meddelande och hittat ett specifikt textcitat, markera det med gult i brödtexten!
                 body_display = selected_msg["body"]
                 current_analysis = st.session_state.get(f"analysis_{selected_msg['id']}")
                 
@@ -283,67 +297,71 @@ with tab2:
                         )
                 st.markdown(body_display, unsafe_allow_html=True)
 
-            analyze_btn = st.button("🔍 Evaluate Against Contract Playbook (Run Nodes 2 & 3)", type="primary", use_container_width=True)
+            analyze_btn = st.button("🔍 Utvärdera Meddelande mot Avtalsregler", type="primary", use_container_width=True)
 
         with analysis_col:
-            st.markdown("#### 🧠 Legal & Operational Risk Intelligence")
+            st.markdown("#### 🧠 Juridisk & Operativ Riskanalys")
             
+            # Starta bedömningen om användaren klickar på knappen
             if analyze_btn:
                 if not st.session_state.get("api_key"):
-                    st.error("Please enter your API Key in the sidebar.")
+                    st.error("Vänligen ange din API-nyckel i sidomenyn.")
                 else:
-                    with st.spinner(f"Analyzing latent triggers using {st.session_state['provider']}..."):
+                    with st.spinner(f"Analyserar dolda avtalsrisker via {st.session_state['provider']}..."):
+                        # Kör analysen från notice_tracker.py
                         res = analyze_project_communication(
                             st.session_state["playbook"], 
                             selected_msg,
                             st.session_state["provider"],
                             st.session_state["api_key"]
                         )
-                        # Deterministic Substring Verification Check
+                        # Gör en extra formell kontroll för att garantera att citatet från AI:n verkligen finns ord-för-ord i e-postmeddelandet (Zero Hallucination Check)
                         quote = res.get("verbatim_evidence_quote")
                         res["grounding_verified"] = bool(quote and quote in selected_msg["body"])
+                        
+                        # Spara resultatet
                         st.session_state[f"analysis_{selected_msg['id']}"] = res
 
             result = st.session_state.get(f"analysis_{selected_msg['id']}")
             
             if not result:
-                st.info("Click **Evaluate Against Contract Playbook** on the left to inspect this message.")
+                st.info("Klicka på **Utvärdera Meddelande mot Avtalsregler** till vänster för att granska detta meddelande.")
             else:
-                # 1. Top Status Banner
+                # 1. Visa färgkodad varningsbanner baserat på allvarlighetsgrad
                 sev = result["severity"]
                 if sev == "CRITICAL_PRECLUSION_RISK":
-                    st.error(f"🚨 **CRITICAL PRECLUSION RISK DETECTED** (Matched Rule: `{result['matched_rule_id']}`)")
+                    st.error(f"🚨 **KRITISK PREKLUSIONSRISK UPPTÄCKT** (Matchad Regel: `{result['matched_rule_id']}`)")
                 elif sev == "PROCEDURAL_FLAW_WARNING":
-                    st.warning(f"⚠️ **PROCEDURAL FLAW / INVALID NOTICE DETECTED** (Matched Rule: `{result['matched_rule_id']}`)")
+                    st.warning(f"⚠️ **FORMKRAVSFEL / OGILTIG UNDERRÄTTELSE** (Matchad Regel: `{result['matched_rule_id']}`)")
                 elif sev == "LOW_MONITOR":
-                    st.info(f"ℹ️ **LOW RISK / MONITOR** (Matched Rule: `{result['matched_rule_id']}`)")
+                    st.info(f"ℹ️ **LÅG RISK / BEVAKA** (Matchad Regel: `{result['matched_rule_id']}`)")
                 else:
-                    st.success("✅ **NO CONTRACTUAL TRIGGER DETECTED (SAFE)**")
+                    st.success("✅ **INGEN AVTALSRISK UPPTÄCKT (SÄKERT)**")
 
-                # 2. Key Metrics Row (Deterministic Date + Grounding Check)
+                # 2. Nyckeltal (Datum + Beviskontroll)
                 if result["is_trigger_detected"]:
                     m1, m2, m3 = st.columns(3)
-                    m1.metric("Hard Preclusion Deadline", result["calculated_hard_deadline"], f"{result['recommended_days_to_act']} Days Window")
-                    m2.metric("Matched Playbook Rule", result["matched_rule_id"])
+                    m1.metric("Sista dag för formell underrättelse", result["calculated_hard_deadline"], f"{result['recommended_days_to_act']} dagars frist")
+                    m2.metric("Matchad Avtalsregel", result["matched_rule_id"])
                     m3.metric(
-                        "Substring Grounding", 
-                        "100% Verified" if result["grounding_verified"] else "Failed",
-                        "Zero Hallucination Check"
+                        "Bevis för textcitat", 
+                        "100% Verifierad" if result["grounding_verified"] else "Misslyckades",
+                        "Citatkontroll genomförd"
                     )
 
-                    # 3. Procedural Defect Alert (if any)
+                    # 3. Varning gällande fel mottagare / behörighet (om tillämpligt)
                     if result.get("procedural_defect_spotted"):
-                        st.warning(f"**Procedural Authority Trap Spotted:** {result['procedural_defect_spotted']}")
+                        st.warning(f"**Varning gällande formkrav/behörighet:** {result['procedural_defect_spotted']}")
 
-                    # 4. Legal & Commercial Reasoning
+                    # 4. Detaljerad Juridisk bedömning
                     with st.container(border=True):
-                        st.markdown("**Legal & Commercial Analysis:**")
+                        st.markdown("**Juridisk & Kommersiell Analys:**")
                         st.write(result["legal_and_commercial_reasoning"])
-                        st.caption(f'**Extracted Evidence Substring:** *"{result["verbatim_evidence_quote"]}"*')
+                        st.caption(f'**Extraherat textcitat (Bevis):** *"{result["verbatim_evidence_quote"]}"*')
 
-                    # 5. Ready-to-Send Formal Notice
+                    # 5. Färdigt utkast på svarsmejl/formell notis
                     if result.get("draft_formal_notice"):
-                        st.markdown("#### ✉️ Auto-Drafted Formal Notice (Ready to Send)")
+                        st.markdown("#### ✉️ Automatiskt utkast för formell underrättelse (Redo att skickas)")
                         st.code(result["draft_formal_notice"], language="markdown")
                 else:
                     st.write(result["legal_and_commercial_reasoning"])
