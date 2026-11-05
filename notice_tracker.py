@@ -114,7 +114,7 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         client = OpenAI(
             api_key=api_key,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            timeout=45.0,   # Force a network timeout after 45 seconds
+            timeout=120.0,   # Force a network timeout after 45 seconds
             max_retries=0   # Disable silent background retries on rate limits
         )
         
