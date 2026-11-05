@@ -114,21 +114,18 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         client = OpenAI(
             api_key=api_key,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            timeout=120.0,   # Force a network timeout after 45 seconds
+            timeout=120.0,  # Increased timeout for Free Tier heavy JSON generation
             max_retries=0   # Disable silent background retries on rate limits
         )
         
         try:
-            # Try multiple standard Gemini models.
-            models_to_try = ["gemini-3.8-flash", "gemini-3.8-pro"]
+            # Use current late-2026 models
+            models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]
             response = None
             last_error = None
             
             for model_name in models_to_try:
                 try:
-                    # FIX: We removed `response_format={"type": "json_object"}`. 
-                    # Google's compatibility wrapper often throws a 500 Internal Server Error when this flag is used.
-                    # Standard text generation works perfectly when prompted to output JSON.
                     response = client.chat.completions.create(
                         model=model_name,
                         messages=[
@@ -141,11 +138,11 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
                 except Exception as e:
                     last_error = e
                     error_type = type(e).__name__
-                    # Catch 404s and 500s by both string and exact class name to ensure we fall back
-                    if "404" in str(e) or "500" in str(e) or "NotFoundError" in error_type or "InternalServerError" in error_type:
+                    # Safely catch Timeouts, Rate Limits, 404s, and 500s to trigger the fallback model
+                    if "404" in str(e) or "500" in str(e) or error_type in ["NotFoundError", "InternalServerError", "APITimeoutError", "RateLimitError"]:
                         continue
                     else:
-                        raise e # Other errors (like 401 Unauthorized) should fail immediately
+                        raise e # Fail immediately on auth errors (401) or bad requests (400)
             
             if response is None:
                 raise ValueError(f"All Gemini models failed. Last error: {str(last_error)}")
