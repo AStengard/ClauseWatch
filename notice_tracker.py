@@ -91,7 +91,7 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
     # Strip whitespace to prevent authentication errors
     api_key = api_key.strip()
     
-    # Force the LLM to adhere to the schema via prompting (Bulletproof strategy for all providers)
+    # Force the LLM to adhere to the schema via prompting
     schema_instructions = f"\n\nIMPORTANT: You MUST return ONLY valid JSON. The JSON must strictly match this schema:\n{json.dumps(schema_class.model_json_schema())}"
     final_system_prompt = system_prompt + schema_instructions
 
@@ -110,23 +110,43 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         return schema_class.model_validate_json(raw_json)
         
     elif provider == "Gemini":
-        # Use OpenAI compatibility wrapper but carefully handling exceptions so they print cleanly
+        # Google's OpenAI compatibility wrapper natively supports gemini-3.8-flash as of late 2026.
         client = OpenAI(
             api_key=api_key,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
         )
+        
         try:
-            response = client.chat.completions.create(
-                model="gemini-1.5-flash",
-                messages=[
-                    {"role": "system", "content": final_system_prompt},
-                    {"role": "user", "content": user_content}
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"}
-            )
+            # Fallback chain for Gemini models in case of 404
+            models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
+            response = None
+            last_error = None
+            
+            for model_name in models_to_try:
+                try:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": final_system_prompt},
+                            {"role": "user", "content": user_content}
+                        ],
+                        temperature=0.0,
+                        response_format={"type": "json_object"}
+                    )
+                    break # Success!
+                except Exception as e:
+                    last_error = e
+                    if "404" in str(e) or "NotFoundError" in str(type(e).__name__):
+                        continue # Try the next model
+                    else:
+                        raise e # If it's a 401 Unauthorized or 429 RateLimit, raise it immediately
+            
+            if response is None:
+                raise ValueError(f"All Gemini models returned 404. Last error: {str(last_error)}")
+                
             raw_json = response.choices[0].message.content
             return schema_class.model_validate_json(raw_json)
+            
         except Exception as e:
             # Raise a cleaner error to show on Streamlit
             raise ValueError(f"Gemini API Error: {str(e)} (Check your API Key and Google AI Studio access)")
