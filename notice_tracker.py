@@ -110,42 +110,52 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         return schema_class.model_validate_json(raw_json)
         
     elif provider == "Gemini":
-        # Google's OpenAI compatibility wrapper natively supports gemini-3.8-flash as of late 2026.
+        # Google's OpenAI compatibility wrapper
         client = OpenAI(
             api_key=api_key,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
         )
         
         try:
-            # Fallback chain for Gemini models in case of 404
-            models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
+            # Try multiple standard Gemini models.
+            models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]
             response = None
             last_error = None
             
             for model_name in models_to_try:
                 try:
+                    # FIX: We removed `response_format={"type": "json_object"}`. 
+                    # Google's compatibility wrapper often throws a 500 Internal Server Error when this flag is used.
+                    # Standard text generation works perfectly when prompted to output JSON.
                     response = client.chat.completions.create(
                         model=model_name,
                         messages=[
                             {"role": "system", "content": final_system_prompt},
                             {"role": "user", "content": user_content}
                         ],
-                        temperature=0.0,
-                        response_format={"type": "json_object"}
+                        temperature=0.0
                     )
                     break # Success!
                 except Exception as e:
                     last_error = e
-                    if "404" in str(e) or "NotFoundError" in str(type(e).__name__):
-                        continue # Try the next model
+                    # If it's a 404 (model not found) or 500 (internal server error on their end), try the next model
+                    if "404" in str(e) or "500" in str(e) or "NotFoundError" in str(type(e).__name__):
+                        continue
                     else:
-                        raise e # If it's a 401 Unauthorized or 429 RateLimit, raise it immediately
+                        raise e # Other errors (like 401 Unauthorized) should fail immediately
             
             if response is None:
-                raise ValueError(f"All Gemini models returned 404. Last error: {str(last_error)}")
+                raise ValueError(f"All Gemini models failed. Last error: {str(last_error)}")
                 
-            raw_json = response.choices[0].message.content
-            return schema_class.model_validate_json(raw_json)
+            raw_text = response.choices[0].message.content
+            
+            # Clean up markdown formatting if Gemini added it
+            if "```json" in raw_text:
+                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in raw_text:
+                raw_text = raw_text.split("```")[1].split("```")[0].strip()
+                
+            return schema_class.model_validate_json(raw_text.strip())
             
         except Exception as e:
             # Raise a cleaner error to show on Streamlit
