@@ -13,13 +13,7 @@ import anthropic
 
 class ContractualTriggerRule(BaseModel):
     rule_id: str = Field(description="Unique ID, e.g., 'RULE_01_ATA_NOTICE' or 'RULE_02_OBSTACLE'")
-    trigger_category: Literal[
-        "ÄTA / Change Order (Likställd ÄTA)",
-        "Delay / Obstacle (Hinder & Tidsförlängning)",
-        "Loyalty / Clarification Duty (Underrättelseplikt / Lojalitetsplikt)",
-        "Passivity Trap / Objection Required (Reklamation / Passivitetsverkan)",
-        "Defect / Liability (Felansvar)"
-    ]
+    trigger_category: str = Field(description="MÅSTE vara en av följande: 'ÄTA / Change Order (Likställd ÄTA)', 'Delay / Obstacle (Hinder & Tidsförlängning)', 'Loyalty / Clarification Duty (Underrättelseplikt / Lojalitetsplikt)', 'Passivity Trap / Objection Required (Reklamation / Passivitetsverkan)', 'Defect / Liability (Felansvar)'")
     base_standard_clause: str = Field(description="Reference to the base standard contract, e.g., 'AB 04 Kap. 2 § 7'")
     overridden_by_custom_terms: bool = Field(description="True if the Kontrakt or AF-del modifies the base standard rule")
     override_clause_reference: Optional[str] = Field(description="Reference to the overriding clause in the main contract/AF, or None")
@@ -31,8 +25,8 @@ class ContractualTriggerRule(BaseModel):
     consequence_of_non_compliance: str = Field(description="Legal/commercial consequence if missed")
 
 class ContractPlaybook(BaseModel):
-    project_name: str
-    compiled_rules: List[ContractualTriggerRule]
+    project_name: str = Field(default="Okänt Projekt")
+    compiled_rules: List[ContractualTriggerRule] = Field(default_factory=list)
 
 class TriggerMatchAnalysis(BaseModel):
     is_trigger_detected: bool = Field(description="True if the communication contains an explicit or latent contractual trigger")
@@ -41,7 +35,7 @@ class TriggerMatchAnalysis(BaseModel):
     verbatim_evidence_quote: Optional[str] = Field(description="Exact word-for-word substring from the email/minutes. DO NOT paraphrase.")
     procedural_defect_spotted: Optional[str] = Field(description="Did they send it to the wrong person or channel?")
     legal_and_commercial_reasoning: str = Field(description="Concise explanation connecting the operational fact to the rule")
-    recommended_days_to_act: int = Field(description="Number of days from the email timestamp within which formal notice must be sent")
+    recommended_days_to_act: int = Field(default=0, description="Number of days from the email timestamp within which formal notice must be sent")
     draft_formal_notice: Optional[str] = Field(description="Ready-to-send formal written notice addressed to the correct recipient")
 
 # =====================================================================
@@ -117,7 +111,6 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         )
         
         try:
-            # Säkerställer att vi testar de stabilaste och mest tillgängliga modellerna
             models_to_try = [
                 "gemini-1.5-flash",
                 "gemini-1.5-pro",
@@ -149,7 +142,6 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
                     elif "```" in raw_text:
                         raw_text = raw_text.split("```")[1].split("```")[0].strip()
                     else:
-                        # Extrahera bara texten mellan första { och sista }
                         match = re.search(r'\{.*\}', raw_text, re.DOTALL)
                         if match:
                             raw_text = match.group(0)
@@ -158,9 +150,10 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
                     return schema_class.model_validate_json(raw_text.strip())
                     
                 except ValidationError as ve:
-                    # AI:n svarade, men det gick inte att tolka till strukturerad data
-                    last_full_error = ValueError(f"AI:n svarade inte i korrekt format. Modellen svarade: {raw_text[:150]}...")
-                    errors.append(f"[{model_name} misslyckades med Pydantic-validering]")
+                    # Fånga exakt vilka fält som saknas eller blev fel!
+                    val_errors = ", ".join([f"{e['loc']}: {e['msg']}" for e in ve.errors()])
+                    last_full_error = ValueError(f"Schema-fel (Pydantic vägrade godkänna AI:ns svar). Felaktiga fält: {val_errors} | AI svarade: {raw_text[:200]}...")
+                    errors.append(f"[{model_name} genererade fel format]")
                     continue
                 except Exception as e:
                     last_full_error = e
