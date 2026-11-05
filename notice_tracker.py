@@ -118,7 +118,7 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         
         try:
             # Try multiple standard Gemini models.
-            models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]
+            models_to_try = ["gemini-3.8-flash", "gemini-3.8-pro"]
             response = None
             last_error = None
             
