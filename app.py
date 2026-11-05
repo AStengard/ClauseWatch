@@ -339,7 +339,7 @@ with tab2:
                     with st.container(border=True):
                         st.markdown("**Legal & Commercial Analysis:**")
                         st.write(result["legal_and_commercial_reasoning"])
-                        st.caption(f"**Extracted Evidence Substring:** *"{result['verbatim_evidence_quote']}"*")
+                        st.caption(f'**Extracted Evidence Substring:** *"{result["verbatim_evidence_quote"]}"*')
 
                     # 5. Ready-to-Send Formal Notice
                     if result.get("draft_formal_notice"):
