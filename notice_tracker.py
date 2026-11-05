@@ -113,12 +113,14 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         # Google's OpenAI compatibility wrapper
         client = OpenAI(
             api_key=api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            timeout=45.0,   # Force a network timeout after 45 seconds
+            max_retries=0   # Disable silent background retries on rate limits
         )
         
         try:
             # Try multiple standard Gemini models.
-            models_to_try = ["gemini-3.8-flash", "gemini-3.8-pro"]
+            models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]
             response = None
             last_error = None
             
@@ -138,8 +140,9 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
                     break # Success!
                 except Exception as e:
                     last_error = e
-                    # If it's a 404 (model not found) or 500 (internal server error on their end), try the next model
-                    if "404" in str(e) or "500" in str(e) or "NotFoundError" in str(type(e).__name__):
+                    error_type = type(e).__name__
+                    # Catch 404s and 500s by both string and exact class name to ensure we fall back
+                    if "404" in str(e) or "500" in str(e) or "NotFoundError" in error_type or "InternalServerError" in error_type:
                         continue
                     else:
                         raise e # Other errors (like 401 Unauthorized) should fail immediately
