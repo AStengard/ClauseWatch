@@ -4,7 +4,6 @@ import json
 from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
-from openai import OpenAI
 
 # Import schemas and functions from your backend file (notice_tracker.py)
 from notice_tracker import (
@@ -19,7 +18,7 @@ from notice_tracker import (
 # PAGE CONFIGURATION & STYLING
 # =====================================================================
 st.set_page_config(
-    page_title="PreclusionGuard AI | Operational Contract Intelligence",
+    page_title="ClauseWatch | Operational Contract Intelligence",
     page_icon="⚖️",
     layout="wide",
 )
@@ -54,7 +53,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =====================================================================
-# DEFAULT SYNTHETIC DATA (AB 04 + Custom Overrides + 4 Inbox Scenarios)
+# DEFAULT SYNTHETIC DATA
 # =====================================================================
 
 DEFAULT_BASE_STANDARD = """AB 04 Kap. 2 § 7 (Underrättelse om likställd ÄTA):
@@ -140,15 +139,23 @@ MOCK_INBOX = [
 # SIDEBAR: CONFIGURATION & ARCHITECTURE INFO
 # =====================================================================
 with st.sidebar:
-    st.title("⚙️ Engine Settings")
-    api_key_input = st.text_input(
-        "OpenAI API Key", 
-        value=os.environ.get("OPENAI_API_KEY", ""), 
-        type="password",
-        help="Required to run live LLM extraction."
+    st.title("⚙️ Engine Settings (BYOK)")
+    st.markdown("Select your preferred AI provider and enter your API key to run the engine. Your key is kept secure in this session only.")
+    
+    provider = st.selectbox(
+        "AI Provider",
+        options=["OpenAI", "Gemini", "Claude"],
+        index=0
     )
-    if api_key_input:
-        os.environ["OPENAI_API_KEY"] = api_key_input
+    
+    api_key = st.text_input(
+        f"{provider} API Key", 
+        type="password",
+        help=f"Enter your {provider} API key here."
+    )
+    
+    st.session_state["provider"] = provider
+    st.session_state["api_key"] = api_key
 
     st.divider()
     st.subheader("🏗️ Pipeline Architecture")
@@ -163,7 +170,8 @@ with st.sidebar:
 # =====================================================================
 # MAIN HEADER
 # =====================================================================
-st.title("⚖️ PreclusionGuard: Cross-Document Notice & Loyalty Tracker")
+st.title("⚖️ ClauseWatch: Cross-Document Notice Tracker")
+st.caption("*By Alfred Stengard*")
 st.markdown(
     "**Bridging the gap between static contract playbooks and live operational project communications.**"
 )
@@ -198,11 +206,16 @@ with tab1:
         )
 
     if st.button("🚀 Compile Contract Playbook (Run Node 1)", type="primary"):
-        if not os.environ.get("OPENAI_API_KEY"):
-            st.error("Please enter your OpenAI API Key in the sidebar to run live compilation.")
+        if not st.session_state.get("api_key"):
+            st.error("Please enter your API Key in the sidebar to run live compilation.")
         else:
-            with st.spinner("Resolving document hierarchy and extracting structured rules..."):
-                playbook = compile_contract_playbook(base_text, custom_text)
+            with st.spinner(f"Running via {st.session_state['provider']}..."):
+                playbook = compile_contract_playbook(
+                    base_text, 
+                    custom_text,
+                    st.session_state["provider"],
+                    st.session_state["api_key"]
+                )
                 st.session_state["playbook"] = playbook
                 st.success(f"Compiled {len(playbook.compiled_rules)} binding rules for {playbook.project_name}!")
 
@@ -222,8 +235,10 @@ with tab1:
                 st.markdown(badge_html, unsafe_allow_html=True)
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Strict Deadline", f"{rule.deadline_days} Days", rule.deadline_type)
-                c2.markdown(f"**Required Recipient:**\n`{rule.required_recipient}`")
-                c3.markdown(f"**Required Channel:**\n`{rule.required_channel}`")
+                c2.markdown(f"**Required Recipient:**
+`{rule.required_recipient}`")
+                c3.markdown(f"**Required Channel:**
+`{rule.required_channel}`")
                 
                 st.markdown(f"**Synthesized Binding Rule:** {rule.effective_rule_logic}")
                 if rule.override_clause_reference:
@@ -276,11 +291,16 @@ with tab2:
             st.markdown("#### 🧠 Legal & Operational Risk Intelligence")
             
             if analyze_btn:
-                if not os.environ.get("OPENAI_API_KEY"):
-                    st.error("Please enter your OpenAI API Key in the sidebar.")
+                if not st.session_state.get("api_key"):
+                    st.error("Please enter your API Key in the sidebar.")
                 else:
-                    with st.spinner("Analyzing latent triggers, recipient authority, and preclusion clocks..."):
-                        res = analyze_project_communication(st.session_state["playbook"], selected_msg)
+                    with st.spinner(f"Analyzing latent triggers using {st.session_state['provider']}..."):
+                        res = analyze_project_communication(
+                            st.session_state["playbook"], 
+                            selected_msg,
+                            st.session_state["provider"],
+                            st.session_state["api_key"]
+                        )
                         # Deterministic Substring Verification Check
                         quote = res.get("verbatim_evidence_quote")
                         res["grounding_verified"] = bool(quote and quote in selected_msg["body"])
@@ -321,7 +341,7 @@ with tab2:
                     with st.container(border=True):
                         st.markdown("**Legal & Commercial Analysis:**")
                         st.write(result["legal_and_commercial_reasoning"])
-                        st.caption(f"**Extracted Evidence Substring:** *\"{result['verbatim_evidence_quote']}\"*")
+                        st.caption(f"**Extracted Evidence Substring:** *"{result['verbatim_evidence_quote']}"*")
 
                     # 5. Ready-to-Send Formal Notice
                     if result.get("draft_formal_notice"):
