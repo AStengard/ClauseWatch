@@ -105,16 +105,21 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
             api_key=api_key,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
         )
-        response = client.beta.chat.completions.parse(
-            model="gemini-2.5-flash",
+        # FIX: Changed to a valid Gemini model and used a bulletproof JSON extraction method.
+        # Google's wrapper occasionally rejects the strict 'json_schema' formatting required by .parse()
+        prompt_with_schema = system_prompt + f"\n\nIMPORTANT: You MUST return ONLY valid JSON that exactly matches this schema:\n{schema_class.model_json_schema()}"
+        
+        response = client.chat.completions.create(
+            model="gemini-1.5-flash",
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": prompt_with_schema},
                 {"role": "user", "content": user_content}
             ],
-            response_format=schema_class,
-            temperature=0.0
+            temperature=0.0,
+            response_format={"type": "json_object"}
         )
-        return response.choices[0].message.parsed
+        raw_json = response.choices[0].message.content
+        return schema_class.model_validate_json(raw_json)
         
     elif provider == "Claude":
         client = anthropic.Anthropic(api_key=api_key)
