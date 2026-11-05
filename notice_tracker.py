@@ -110,63 +110,68 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
             max_retries=3   
         )
         
-        try:
-            models_to_try = [
-                "gemini-1.5-flash",
-                "gemini-1.5-pro",
-                "gemini-2.5-flash",
-                "gemini-flash-latest"
-            ]
-            
-            errors = []
-            response = None
-            last_full_error = None
-            raw_text = ""
-            
-            for model_name in models_to_try:
-                try:
-                    response = client.chat.completions.create(
-                        model=model_name,
-                        messages=[
-                            {"role": "system", "content": final_system_prompt},
-                            {"role": "user", "content": user_content}
-                        ],
-                        temperature=0.0
-                    )
-                    
-                    raw_text = response.choices[0].message.content
-                    
-                    # Bättre städning om AI:n pratar för mycket
-                    if "```json" in raw_text:
-                        raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-                    elif "```" in raw_text:
-                        raw_text = raw_text.split("```")[1].split("```")[0].strip()
-                    else:
-                        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-                        if match:
-                            raw_text = match.group(0)
-                            
-                    # Validera JSON mot Pydantic
-                    return schema_class.model_validate_json(raw_text.strip())
-                    
-                except ValidationError as ve:
-                    # Fånga exakt vilka fält som saknas eller blev fel!
-                    val_errors = ", ".join([f"{e['loc']}: {e['msg']}" for e in ve.errors()])
-                    last_full_error = ValueError(f"Schema-fel (Pydantic vägrade godkänna AI:ns svar). Felaktiga fält: {val_errors} | AI svarade: {raw_text[:200]}...")
-                    errors.append(f"[{model_name} genererade fel format]")
-                    continue
-                except Exception as e:
-                    last_full_error = e
-                    errors.append(f"[{model_name} failed: {type(e).__name__}]")
-                    continue
-            
-            if response is None or last_full_error:
-                error_summary = " | ".join(errors)
-                raise ValueError(f"Ingen AI-modell lyckades slutföra uppgiften. Diagnostik: {error_summary}. Detaljer: {str(last_full_error)}")
-            
-        except Exception as e:
-            raise ValueError(f"Ett fel uppstod: {str(e)}")
+        models_to_try = [
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-2.5-flash"
+        ]
         
+        errors = []
+        response = None
+        last_full_error = None
+        raw_text = ""
+        
+        for model_name in models_to_try:
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": final_system_prompt},
+                        {"role": "user", "content": user_content}
+                    ],
+                    temperature=0.0
+                )
+                
+                raw_text = response.choices[0].message.content
+                
+                # Städning om AI:n pratar text istället för JSON
+                if "```json" in raw_text:
+                    raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in raw_text:
+                    raw_text = raw_text.split("```")[1].split("```")[0].strip()
+                else:
+                    match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                    if match:
+                        raw_text = match.group(0)
+                        
+                # Validera JSON mot Pydantic
+                return schema_class.model_validate_json(raw_text.strip())
+                
+            except ValidationError as ve:
+                val_errors = ", ".join([f"{e['loc']}: {e['msg']}" for e in ve.errors()])
+                last_full_error = ValueError(f"Pydantic-validering misslyckades. Saknade/felaktiga fält: {val_errors} | AI svarade: {raw_text[:200]}...")
+                errors.append(f"[{model_name} fel format]")
+                continue
+                
+            except Exception as e:
+                error_type = type(e).__name__
+                error_msg = str(e).lower()
+                
+                # Fånga kritiska fel (T.ex. nyckel eller gränser) så vi inte döljer dem i loopen
+                if "401" in error_msg or "auth" in error_msg:
+                    raise ValueError("Ogiltig API-nyckel. Kontrollera att din Gemini API-nyckel är korrekt.")
+                if "429" in error_msg or "rate" in error_msg or "quota" in error_msg:
+                    raise ValueError("Rate Limit (Kvot överskriden). Du skickar förfrågningar för snabbt för gratisversionen. Vänta en minut och försök igen.")
+                
+                last_full_error = e
+                errors.append(f"[{model_name} failed: {error_type}]")
+                continue
+        
+        # Om vi kommer hit har alla modeller misslyckats utan att det var ett auktoriseringsfel
+        error_summary = " | ".join(errors)
+        raise ValueError(f"Tekniskt fel hos Gemini. Inga modeller svarade korrekt.\n\nModellstatus: {error_summary}\n\nSista felet från servern: {str(last_full_error)}")
+            
     elif provider == "Claude":
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
