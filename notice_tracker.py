@@ -114,14 +114,22 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         client = OpenAI(
             api_key=api_key,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            timeout=120.0,  # Keep the longer timeout
-            max_retries=3   # Re-enable automatic backoff retries for rate limits
+            timeout=120.0,  
+            max_retries=3   
         )
         
         try:
-            models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"]
+            # Broad model net to account for region/tier availability differences
+            models_to_try = [
+                "gemini-3.8-flash",
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-flash-latest"
+            ]
+            
+            errors = []
             response = None
-            last_error = None
+            last_full_error = None
             
             for model_name in models_to_try:
                 try:
@@ -135,18 +143,14 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
                     )
                     break # Success!
                 except Exception as e:
-                    last_error = e
-                    error_type = type(e).__name__
-                    
-                    # Only skip to the next model if the model itself is not found (404) or broken (500)
-                    if "404" in str(e) or "500" in str(e) or error_type in ["NotFoundError", "InternalServerError"]:
-                        continue
-                    else:
-                        # If it's a rate limit or a timeout that exhausted all retries, bubble it up directly!
-                        raise ValueError(f"API Error ({error_type}): {str(e)}")
+                    last_full_error = e
+                    errors.append(f"[{model_name} failed: {type(e).__name__}]")
+                    continue
             
             if response is None:
-                raise ValueError(f"All Gemini models failed (likely 404 or 500). Last error: {str(last_error)}")
+                # If all failed, provide a transparent summary so the user isn't guessing
+                error_summary = " ".join(errors)
+                raise ValueError(f"All attempted models failed. Trace: {error_summary}. Final raw error: {str(last_full_error)}")
                 
             raw_text = response.choices[0].message.content
             
@@ -159,7 +163,7 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
             return schema_class.model_validate_json(raw_text.strip())
             
         except Exception as e:
-            # Raise a cleaner error to show on Streamlit
+            # Raise a cleaner error to show on Streamlit without the traceback getting swallowed
             raise ValueError(f"Gemini API Error: {str(e)}")
         
     elif provider == "Claude":
