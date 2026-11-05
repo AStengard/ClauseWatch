@@ -1,8 +1,9 @@
 import os
 import json
+import re
 from datetime import datetime, timedelta
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from openai import OpenAI
 import anthropic
 
@@ -88,10 +89,8 @@ CRITICAL ANALYSIS RULES:
 def get_structured_response(provider: str, api_key: str, system_prompt: str, user_content: str, schema_class: type[BaseModel]) -> BaseModel:
     """Helper to route the request to the correct LLM provider and return a validated Pydantic object."""
     
-    # Strip whitespace to prevent authentication errors
     api_key = api_key.strip()
     
-    # Force the LLM to adhere to the schema via prompting
     schema_instructions = f"\n\nIMPORTANT: You MUST return ONLY valid JSON. The JSON must strictly match this schema:\n{json.dumps(schema_class.model_json_schema())}"
     final_system_prompt = system_prompt + schema_instructions
 
@@ -110,7 +109,6 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         return schema_class.model_validate_json(raw_json)
         
     elif provider == "Gemini":
-        # Google's OpenAI compatibility wrapper
         client = OpenAI(
             api_key=api_key,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -119,17 +117,18 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
         )
         
         try:
-            # Broad model net to account for region/tier availability differences
+            # Säkerställer att vi testar de stabilaste och mest tillgängliga modellerna
             models_to_try = [
-                "gemini-3.8-flash",
+                "gemini-1.5-flash",
+                "gemini-1.5-pro",
                 "gemini-2.5-flash",
-                "gemini-2.5-flash-lite",
                 "gemini-flash-latest"
             ]
             
             errors = []
             response = None
             last_full_error = None
+            raw_text = ""
             
             for model_name in models_to_try:
                 try:
@@ -141,30 +140,39 @@ def get_structured_response(provider: str, api_key: str, system_prompt: str, use
                         ],
                         temperature=0.0
                     )
-                    break # Success!
+                    
+                    raw_text = response.choices[0].message.content
+                    
+                    # Bättre städning om AI:n pratar för mycket
+                    if "```json" in raw_text:
+                        raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+                    elif "```" in raw_text:
+                        raw_text = raw_text.split("```")[1].split("```")[0].strip()
+                    else:
+                        # Extrahera bara texten mellan första { och sista }
+                        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                        if match:
+                            raw_text = match.group(0)
+                            
+                    # Validera JSON mot Pydantic
+                    return schema_class.model_validate_json(raw_text.strip())
+                    
+                except ValidationError as ve:
+                    # AI:n svarade, men det gick inte att tolka till strukturerad data
+                    last_full_error = ValueError(f"AI:n svarade inte i korrekt format. Modellen svarade: {raw_text[:150]}...")
+                    errors.append(f"[{model_name} misslyckades med Pydantic-validering]")
+                    continue
                 except Exception as e:
                     last_full_error = e
                     errors.append(f"[{model_name} failed: {type(e).__name__}]")
                     continue
             
-            if response is None:
-                # If all failed, provide a transparent summary so the user isn't guessing
-                error_summary = " ".join(errors)
-                raise ValueError(f"All attempted models failed. Trace: {error_summary}. Final raw error: {str(last_full_error)}")
-                
-            raw_text = response.choices[0].message.content
-            
-            # Clean up markdown formatting if Gemini added it
-            if "```json" in raw_text:
-                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw_text:
-                raw_text = raw_text.split("```")[1].split("```")[0].strip()
-                
-            return schema_class.model_validate_json(raw_text.strip())
+            if response is None or last_full_error:
+                error_summary = " | ".join(errors)
+                raise ValueError(f"Ingen AI-modell lyckades slutföra uppgiften. Diagnostik: {error_summary}. Detaljer: {str(last_full_error)}")
             
         except Exception as e:
-            # Raise a cleaner error to show on Streamlit without the traceback getting swallowed
-            raise ValueError(f"Gemini API Error: {str(e)}")
+            raise ValueError(f"Ett fel uppstod: {str(e)}")
         
     elif provider == "Claude":
         client = anthropic.Anthropic(api_key=api_key)
